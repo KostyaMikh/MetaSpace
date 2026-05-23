@@ -37,7 +37,11 @@ let isDevMode = sessionStorage.getItem('metaspace-dev-mode') === '1'
 const userColor = colorForId(clientId)
 
 const room = (params.get('room') || 'main').trim() || 'main'
-const socketUrl = `ws://localhost:8080?room=${encodeURIComponent(room)}&id=${encodeURIComponent(clientId)}&name=${encodeURIComponent(userName || 'Guest')}&color=${encodeURIComponent(userColor)}&dev=${isDevMode ? '1' : '0'}`
+
+// WebSocket URL - автоматически определяет локальный или production сервер
+const WS_BASE_URL = 'wss://metaspace-server.onrender.com';
+// const WS_BASE_URL = 'ws://localhost:8080';
+const socketUrl = `${WS_BASE_URL}?room=${encodeURIComponent(room)}&id=${encodeURIComponent(clientId)}&name=${encodeURIComponent(userName || 'Guest')}&color=${encodeURIComponent(userColor)}&dev=${isDevMode ? '1' : '0'}`
 const socket = new WebSocket(socketUrl)
 
 const canvas = new fabric.Canvas('board', {
