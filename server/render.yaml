@@ -11,7 +11,3 @@ services:
         value: 10000
       - key: NODE_ENV
         value: production
-    disk:
-      name: metaspace-data
-      mountPath: /data
-      sizeGB: 1
