@@ -1,7 +1,7 @@
 {
     "name": "metaspace-server",
     "version": "1.0.0",
-    "description": "MetaSpace WebSocket + HTTP server with SQLite persistence",
+    "description": "MetaSpace WebSocket server with JSON file persistence",
     "main": "server.js",
     "scripts": {
         "start": "node server.js"
@@ -10,7 +10,6 @@
         "node": ">=18.0.0"
     },
     "dependencies": {
-        "better-sqlite3": "^12.10.0",
         "ws": "^8.20.1"
     }
 }

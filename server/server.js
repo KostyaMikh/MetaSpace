@@ -1,30 +1,56 @@
 const WebSocket = require('ws')
+const fs = require('fs')
 const path = require('path')
-const Database = require('better-sqlite3')
 
-// ── SQLite setup ──────────────────────────────────────────────────────────────
-// Используем /data для персистентного хранилища на Render.com
+// ── JSON File Storage ─────────────────────────────────────────────────────────
 const DATA_DIR = process.env.DATA_DIR || __dirname
-const DB_PATH = path.join(DATA_DIR, 'boards.db')
-const db = new Database(DB_PATH)
+const BOARDS_FILE = path.join(DATA_DIR, 'boards.json')
 
-db.exec(`
-    CREATE TABLE IF NOT EXISTS boards (
-        room_id    TEXT PRIMARY KEY,
-        data       TEXT NOT NULL,
-        updated_at INTEGER NOT NULL DEFAULT (unixepoch())
-    )
-`)
+// Загружаем все доски из JSON файла
+function loadAllBoards() {
+    try {
+        if (fs.existsSync(BOARDS_FILE)) {
+            const data = fs.readFileSync(BOARDS_FILE, 'utf8')
+            return JSON.parse(data)
+        }
+    } catch (e) {
+        console.error('Error loading boards:', e)
+    }
+    return {}
+}
 
-const stmtGet = db.prepare('SELECT data FROM boards WHERE room_id = ?')
-const stmtUpsert = db.prepare(`
-    INSERT INTO boards (room_id, data, updated_at)
-    VALUES (?, ?, unixepoch())
-    ON CONFLICT(room_id) DO UPDATE SET data = excluded.data, updated_at = excluded.updated_at
-`)
+// Сохраняем все доски в JSON файл
+function saveAllBoards(boards) {
+    try {
+        fs.writeFileSync(BOARDS_FILE, JSON.stringify(boards, null, 2), 'utf8')
+    } catch (e) {
+        console.error('Error saving boards:', e)
+    }
+}
+
+// Кэш досок в памяти
+let boardsCache = loadAllBoards()
+
+// Периодическое сохранение (каждые 30 секунд)
+setInterval(() => {
+    saveAllBoards(boardsCache)
+}, 30000)
+
+// Сохранение при завершении процесса
+process.on('SIGTERM', () => {
+    console.log('Saving boards before shutdown...')
+    saveAllBoards(boardsCache)
+    process.exit(0)
+})
+
+process.on('SIGINT', () => {
+    console.log('Saving boards before shutdown...')
+    saveAllBoards(boardsCache)
+    process.exit(0)
+})
 // ─────────────────────────────────────────────────────────────────────────────
 
-const WS_PORT = process.env.WS_PORT || 8080
+const WS_PORT = process.env.PORT || process.env.WS_PORT || 8080
 
 const DEFAULT_ROOM = 'main'
 const MAX_BOARD_BYTES = 5 * 1024 * 1024
@@ -46,8 +72,9 @@ function emptyBoard() {
 
 function loadBoard(roomId) {
     try {
-        const row = stmtGet.get(roomId)
-        if (row) return JSON.parse(row.data)
+        if (boardsCache[roomId]) {
+            return boardsCache[roomId]
+        }
     } catch (e) {
         console.error('load error:', e)
     }
@@ -57,7 +84,9 @@ function loadBoard(roomId) {
 function saveBoard(roomId) {
     const room = rooms.get(roomId)
     if (!room) return
-    stmtUpsert.run(roomId, JSON.stringify(room.board))
+    boardsCache[roomId] = room.board
+    // Сохраняем сразу при изменении (дополнительно к периодическому)
+    saveAllBoards(boardsCache)
 }
 
 function getRoom(roomId) {
@@ -214,4 +243,4 @@ wss.on('connection', (ws, req) => {
     })
 })
 
-console.log(`WebSocket server running  ws://localhost:${WS_PORT}`)
+console.log(`WebSocket server running on port ${WS_PORT}`)
