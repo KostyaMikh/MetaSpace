@@ -1,47 +1,28 @@
 const WebSocket = require('ws')
-const http = require('http')
-const fs = require('fs')
 const path = require('path')
+const Database = require('better-sqlite3')
 
-// ── Static file server ────────────────────────────────────────────────────────
-const MIME = {
-    '.html': 'text/html',
-    '.css': 'text/css',
-    '.js': 'application/javascript',
-    '.json': 'application/json',
-    '.png': 'image/png',
-    '.jpg': 'image/jpeg',
-    '.jpeg': 'image/jpeg',
-    '.gif': 'image/gif',
-    '.svg': 'image/svg+xml',
-    '.ico': 'image/x-icon',
-    '.woff': 'font/woff',
-    '.woff2': 'font/woff2',
-}
+// ── SQLite setup ──────────────────────────────────────────────────────────────
+const DB_PATH = path.join(__dirname, 'boards.db')
+const db = new Database(DB_PATH)
 
-const staticServer = http.createServer((req, res) => {
-    // Default to index.html for "/"
-    const urlPath = req.url === '/' ? '/index.html' : req.url.split('?')[0]
-    const filePath = path.join(__dirname, urlPath)
-    const ext = path.extname(filePath).toLowerCase()
+db.exec(`
+    CREATE TABLE IF NOT EXISTS boards (
+        room_id    TEXT PRIMARY KEY,
+        data       TEXT NOT NULL,
+        updated_at INTEGER NOT NULL DEFAULT (unixepoch())
+    )
+`)
 
-    fs.readFile(filePath, (err, data) => {
-        if (err) {
-            res.writeHead(404, { 'Content-Type': 'text/plain' })
-            res.end('404 Not Found')
-            return
-        }
-        res.writeHead(200, { 'Content-Type': MIME[ext] || 'application/octet-stream' })
-        res.end(data)
-    })
-})
-
-staticServer.listen(3000, () => {
-    console.log('Static server running  http://localhost:3000')
-})
+const stmtGet = db.prepare('SELECT data FROM boards WHERE room_id = ?')
+const stmtUpsert = db.prepare(`
+    INSERT INTO boards (room_id, data, updated_at)
+    VALUES (?, ?, unixepoch())
+    ON CONFLICT(room_id) DO UPDATE SET data = excluded.data, updated_at = excluded.updated_at
+`)
 // ─────────────────────────────────────────────────────────────────────────────
 
-const wss = new WebSocket.Server({ port: 8080 })
+const WS_PORT = process.env.WS_PORT || 8080
 
 const DEFAULT_ROOM = 'main'
 const MAX_BOARD_BYTES = 5 * 1024 * 1024
@@ -57,35 +38,24 @@ function sanitizeRoom(value) {
         .slice(0, 40) || DEFAULT_ROOM
 }
 
-function boardPath(roomId) {
-    if (roomId === DEFAULT_ROOM) return path.join(__dirname, 'board.json')
-
-    return path.join(__dirname, `board-${roomId}.json`)
-}
-
 function emptyBoard() {
     return { version: '5.3.0', objects: [] }
 }
 
 function loadBoard(roomId) {
     try {
-        const file = boardPath(roomId)
-
-        if (fs.existsSync(file)) {
-            return JSON.parse(fs.readFileSync(file, 'utf-8'))
-        }
+        const row = stmtGet.get(roomId)
+        if (row) return JSON.parse(row.data)
     } catch (e) {
-        console.log('load error:', e)
+        console.error('load error:', e)
     }
-
     return emptyBoard()
 }
 
 function saveBoard(roomId) {
     const room = rooms.get(roomId)
     if (!room) return
-
-    fs.writeFileSync(boardPath(roomId), JSON.stringify(room.board, null, 2))
+    stmtUpsert.run(roomId, JSON.stringify(room.board))
 }
 
 function getRoom(roomId) {
@@ -95,7 +65,6 @@ function getRoom(roomId) {
             clients: new Set()
         })
     }
-
     return rooms.get(roomId)
 }
 
@@ -107,9 +76,7 @@ function send(ws, msg) {
 
 function broadcast(room, msg, except) {
     for (const client of room.clients) {
-        if (client !== except) {
-            send(client, msg)
-        }
+        if (client !== except) send(client, msg)
     }
 }
 
@@ -122,22 +89,22 @@ function userList(room) {
     }))
 }
 
-function validateBoard(message, ws) {
+function validateBoard(message) {
     if (!message.data || !Array.isArray(message.data.objects)) {
         return { message: 'Bad board data.' }
     }
-
     if (message.data.objects.length > MAX_OBJECTS) {
         return { message: `Board limit reached: max ${MAX_OBJECTS} objects.` }
     }
-
     const bytes = Buffer.byteLength(JSON.stringify(message.data), 'utf8')
     if (bytes > MAX_BOARD_BYTES) {
         return { message: 'Board is too large. Try deleting large images or old drawings.' }
     }
-
     return null
 }
+
+// ── WebSocket server ──────────────────────────────────────────────────────────
+const wss = new WebSocket.Server({ port: WS_PORT })
 
 wss.on('connection', (ws, req) => {
     const url = new URL(req.url, 'ws://localhost')
@@ -153,46 +120,21 @@ wss.on('connection', (ws, req) => {
     }
 
     room.clients.add(ws)
+    console.log(`[+] ${ws.meta.name} joined "${roomId}" (${room.clients.size} online)`)
 
-    console.log(`Client connected: ${ws.meta.name} in ${roomId} (${room.clients.size})`)
+    send(ws, { type: 'hello', id: ws.meta.id, room: roomId })
+    send(ws, { type: 'board', data: room.board })
 
-    send(ws, {
-        type: 'hello',
-        id: ws.meta.id,
-        room: roomId
-    })
+    const usersMsg = { type: 'users', count: room.clients.size, users: userList(room) }
+    broadcast(room, usersMsg)
+    send(ws, usersMsg)
 
-    send(ws, {
-        type: 'board',
-        data: room.board
-    })
-
-    broadcast(room, {
-        type: 'users',
-        count: room.clients.size,
-        users: userList(room)
-    })
-
-    send(ws, {
-        type: 'users',
-        count: room.clients.size,
-        users: userList(room)
-    })
-
-    ws.on('message', (message) => {
+    ws.on('message', (raw) => {
         let msg
-
-        try {
-            msg = JSON.parse(message)
-        } catch {
-            return
-        }
+        try { msg = JSON.parse(raw) } catch { return }
 
         if (msg.type === 'get_board') {
-            send(ws, {
-                type: 'board',
-                data: room.board
-            })
+            send(ws, { type: 'board', data: room.board })
             return
         }
 
@@ -200,18 +142,9 @@ wss.on('connection', (ws, req) => {
             ws.meta.name = String(msg.name || 'Guest').slice(0, 24)
             ws.meta.color = String(msg.color || ws.meta.color).slice(0, 16)
             ws.meta.dev = msg.dev === true
-
-            broadcast(room, {
-                type: 'users',
-                count: room.clients.size,
-                users: userList(room)
-            })
-
-            send(ws, {
-                type: 'users',
-                count: room.clients.size,
-                users: userList(room)
-            })
+            const u = { type: 'users', count: room.clients.size, users: userList(room) }
+            broadcast(room, u)
+            send(ws, u)
             return
         }
 
@@ -231,59 +164,41 @@ wss.on('connection', (ws, req) => {
         if (msg.type === 'chat') {
             const text = String(msg.text || '').trim().slice(0, 200)
             if (!text) return
-
-            // Broadcast to all OTHER clients (sender already displayed it locally)
             broadcast(room, {
                 type: 'chat',
                 id: ws.meta.id,
                 name: ws.meta.name,
                 color: ws.meta.color,
                 dev: ws.meta.dev || false,
-                text: text
+                text
             }, ws)
             return
         }
 
         if (msg.type === 'update') {
-            const problem = validateBoard(msg, ws)
-
+            const problem = validateBoard(msg)
             if (problem) {
-                send(ws, {
-                    type: 'limit',
-                    message: problem.message,
-                    drawRemaining: problem.remaining
-                })
+                send(ws, { type: 'limit', message: problem.message })
                 return
             }
-
             room.board = msg.data
             saveBoard(roomId)
-
-            broadcast(room, {
-                type: 'board',
-                data: room.board
-            })
+            broadcast(room, { type: 'board', data: room.board })
+            return
         }
 
         // ── Dev-only admin commands ───────────────────────────────────────────
         if (msg.type === 'dev_clear_chat') {
             if (!ws.meta.dev) return
-
-            // Broadcast to ALL clients in the room (including sender)
-            for (const client of room.clients) {
-                send(client, { type: 'clear_chat' })
-            }
-            console.log(`[dev] clear_chat by ${ws.meta.name} in ${roomId}`)
+            for (const client of room.clients) send(client, { type: 'clear_chat' })
+            console.log(`[dev] clear_chat by ${ws.meta.name} in "${roomId}"`)
             return
         }
 
         if (msg.type === 'dev_reset_limit') {
             if (!ws.meta.dev) return
-
-            for (const client of room.clients) {
-                send(client, { type: 'reset_limit' })
-            }
-            console.log(`[dev] reset_limit by ${ws.meta.name} in ${roomId}`)
+            for (const client of room.clients) send(client, { type: 'reset_limit' })
+            console.log(`[dev] reset_limit by ${ws.meta.name} in "${roomId}"`)
             return
         }
         // ─────────────────────────────────────────────────────────────────────
@@ -291,18 +206,10 @@ wss.on('connection', (ws, req) => {
 
     ws.on('close', () => {
         room.clients.delete(ws)
-
-        broadcast(room, {
-            type: 'leave',
-            id: ws.meta.id
-        })
-
-        broadcast(room, {
-            type: 'users',
-            count: room.clients.size,
-            users: userList(room)
-        })
+        console.log(`[-] ${ws.meta.name} left "${roomId}" (${room.clients.size} online)`)
+        broadcast(room, { type: 'leave', id: ws.meta.id })
+        broadcast(room, { type: 'users', count: room.clients.size, users: userList(room) })
     })
 })
 
-console.log('Server running ws://localhost:8080')
+console.log(`WebSocket server running  ws://localhost:${WS_PORT}`)

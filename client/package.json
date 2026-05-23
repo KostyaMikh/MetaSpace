@@ -1,0 +1,11 @@
+{
+    "name": "metaspace-client",
+    "version": "1.0.0",
+    "description": "MetaSpace collaborative whiteboard — browser client",
+    "scripts": {
+        "start": "npx serve . -l 3000"
+    },
+    "devDependencies": {
+        "serve": "^14.2.4"
+    }
+}

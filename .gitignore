@@ -1,4 +1,7 @@
 node_modules/
+boards.db
+boards.db-shm
+boards.db-wal
 .env
 .env.local
 .env.*.local

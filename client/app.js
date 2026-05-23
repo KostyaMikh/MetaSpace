@@ -593,10 +593,6 @@ window.addEventListener('mouseenter', () => {
     localCursor.style.display = ''
 })
 
-function randomColor() {
-    return USER_COLORS[Math.floor(Math.random() * USER_COLORS.length)]
-}
-
 function colorForId(id) {
     const value = String(id || '')
     let hash = 0
