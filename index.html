@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>MetaSpace</title>
+    <link rel="icon"
+        href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='18' fill='%230b0b0f'/><text y='.9em' font-size='80' x='10'>🌐</text></svg>" />
+
+    <link rel="stylesheet" href="style.css" />
+    <script src="https://cdn.jsdelivr.net/npm/fabric@5.3.0/dist/fabric.min.js"></script>
+</head>
+
+<body>
+
+    <div id="toolbar">
+        <button id="selectBtn" title="Select (S)">🖱</button>
+        <button id="drawBtn" title="Draw (D)">✏️</button>
+        <button id="eraseBtn" title="Erase (E)">🧽</button>
+
+        <input type="color" id="colorPicker" value="#ffffff" title="Brush color" />
+        <input type="range" id="brushSize" min="1" max="40" value="4" title="Brush size" />
+
+        <button id="noteBtn" title="Add sticky note (N)">📝</button>
+        <button id="uploadBtn" title="Upload image">🖼</button>
+        <button id="privateBtn" title="Create private zone">PRIVATE</button>
+        <button id="lockBtn" title="Lock / unlock selected">LOCK</button>
+        <button id="undoBtn" title="Undo (Ctrl+Z)">UNDO</button>
+        <button id="redoBtn" title="Redo (Ctrl+Y)">REDO</button>
+        <button id="zoomOutBtn" title="Zoom out">-</button>
+        <button id="zoomResetBtn" title="Reset zoom">100%</button>
+        <button id="zoomInBtn" title="Zoom in">+</button>
+        <button id="muteBtn" title="Toggle ambient music">🔊</button>
+        <input type="file" id="imageInput" hidden />
+    </div>
+
+    <div id="hud">
+        <div id="coords">x: 0, y: 0</div>
+
+        <input id="teleportInput" placeholder="x,y" />
+        <button id="goBtn">GO</button>
+        <button id="copyBtn">COPY</button>
+    </div>
+
+    <div id="users">Users: 1</div>
+    <div id="quota">Limit area: --</div>
+    <div id="status"></div>
+    <div id="profile">
+        <div id="devHint" hidden>DEV MODE ACTIVE - F10 toggles console</div>
+        <div id="chatHint">F9 toggles chat</div>
+        <input id="nameInput" maxlength="24" />
+        <button id="nameBtn">NAME</button>
+    </div>
+    <div id="devConsole" hidden>
+        <div id="devConsoleHeader">
+            <span class="dev-dot"></span>
+            <span class="dev-title">root@metaspace:~</span>
+            <div class="dev-window-controls">
+                <button id="devMinBtn" type="button">_</button>
+                <button id="devMaxBtn" type="button">[]</button>
+                <button id="devCloseBtn" type="button">X</button>
+            </div>
+        </div>
+        <div class="dev-body">
+            <button id="eraseAllBtn" hidden>ERASE ALL</button>
+            <button id="skipLimitBtn" hidden>SKIP LIMIT</button>
+            <button id="resetLimitBtn" hidden>RESET LIMIT</button>
+            <button id="maxLimitBtn" hidden>MAX LIMIT</button>
+            <button id="clearChatBtn" hidden>CLEAR CHAT</button>
+            <button id="resetLimitAllBtn" hidden>RESET LIMIT ALL</button>
+        </div>
+    </div>
+    <div id="cursorLayer"></div>
+    <div id="localCursor" class="remote-cursor">
+        <div class="cursor-arrow"></div>
+        <div class="cursor-name"></div>
+    </div>
+
+    <div id="chatContainer">
+        <div id="chatHeader">
+            <span class="chat-dot"></span>
+            <span class="chat-title">💬 Chat</span>
+            <div class="chat-window-controls">
+                <button id="chatMinBtn" type="button">_</button>
+                <button id="chatMaxBtn" type="button">[]</button>
+                <button id="chatCloseBtn" type="button">X</button>
+            </div>
+        </div>
+        <div id="chatMessages"></div>
+        <div id="chatInputContainer">
+            <div id="emojiPicker">
+                <button class="emoji-btn" data-emoji="😀">😀</button>
+                <button class="emoji-btn" data-emoji="😂">😂</button>
+                <button class="emoji-btn" data-emoji="❤️">❤️</button>
+                <button class="emoji-btn" data-emoji="👍">👍</button>
+                <button class="emoji-btn" data-emoji="👎">👎</button>
+                <button class="emoji-btn" data-emoji="🔥">🔥</button>
+                <button class="emoji-btn" data-emoji="✨">✨</button>
+                <button class="emoji-btn" data-emoji="🎉">🎉</button>
+                <button class="emoji-btn" data-emoji="💡">💡</button>
+                <button class="emoji-btn" data-emoji="🚀">🚀</button>
+                <button class="emoji-btn" data-emoji="⭐">⭐</button>
+                <button class="emoji-btn" data-emoji="💯">💯</button>
+            </div>
+            <div id="chatInputRow">
+                <button id="emojiToggleBtn">😀</button>
+                <input type="text" id="chatInput" placeholder="Type a message..." maxlength="200" />
+                <button id="chatSendBtn">Send</button>
+            </div>
+        </div>
+    </div>
+
+    <canvas id="board"></canvas>
+
+    <div id="emptyHint">
+        <div id="emptyHintIcon">🎨</div>
+        <div id="emptyHintText">This board is empty</div>
+        <div id="emptyHintSub">Pick ✏️ to draw, 📝 for a note, or 🖼 to upload an image</div>
+    </div>
+
+    <div id="nameModal" hidden>
+        <div id="nameModalBox">
+            <!-- Normal mode -->
+            <div id="nameModalNormal">
+                <div id="nameModalIcon">🌐</div>
+                <div id="nameModalTitle">Welcome to MetaSpace</div>
+                <div id="nameModalSub">Enter your name to join the board</div>
+                <input id="nameModalInput" type="text" maxlength="24" placeholder="Your name..." autocomplete="off"
+                    spellcheck="false" />
+                <div id="nameModalActions">
+                    <button id="nameModalBtn">Join</button>
+                    <button id="nameModalDevBtn"> Dev Mode</button>
+                </div>
+            </div>
+            <!-- Dev mode PIN screen -->
+            <div id="nameModalDev" hidden>
+                <div id="nameModalIcon">🔧</div>
+                <div id="nameModalTitle" style="color:#00ff7f;text-shadow:0 0 12px rgba(0,255,127,0.5)">Dev Mode</div>
+                <div id="nameModalSub">Enter PIN to continue</div>
+                <input id="nameModalPin" type="password" maxlength="16" placeholder="PIN..." autocomplete="off" />
+                <div id="nameModalPinError" hidden>Wrong PIN</div>
+                <div id="nameModalActions">
+                    <button id="nameModalPinBtn">Unlock</button>
+                    <button id="nameModalBackBtn">← Back</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="loadingOverlay">
+        <div id="loadingSpinner"></div>
+        <div id="loadingText">Connecting to MetaSpace...</div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+
+</html>
