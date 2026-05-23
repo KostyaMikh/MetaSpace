@@ -3,7 +3,9 @@ const path = require('path')
 const Database = require('better-sqlite3')
 
 // ── SQLite setup ──────────────────────────────────────────────────────────────
-const DB_PATH = path.join(__dirname, 'boards.db')
+// Используем /data для персистентного хранилища на Render.com
+const DATA_DIR = process.env.DATA_DIR || __dirname
+const DB_PATH = path.join(DATA_DIR, 'boards.db')
 const db = new Database(DB_PATH)
 
 db.exec(`

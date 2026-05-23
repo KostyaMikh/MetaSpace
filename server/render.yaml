@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: metaspace-server
+    runtime: node
+    region: frankfurt
+    plan: free
+    buildCommand: npm install
+    startCommand: node server.js
+    envVars:
+      - key: WS_PORT
+        value: 10000
+      - key: NODE_ENV
+        value: production
+    disk:
+      name: metaspace-data
+      mountPath: /data
+      sizeGB: 1
